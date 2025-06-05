@@ -1,0 +1,28 @@
+# Conf of the test sway environment
+
+# Configure 5 headless displays
+output HEADLESS-1 mode 500x500
+output HEADLESS-2 mode 500x500
+output HEADLESS-3 mode 500x500
+output HEADLESS-4 mode 500x500
+output HEADLESS-5 mode 500x500
+
+# Helper for debugging/taking screenshots, the displays have different
+# background and have a bar on top
+exec swaybg -o HEADLESS-1 -c \#ff0000
+exec swaybg -o HEADLESS-2 -c \#ffff00
+exec swaybg -o HEADLESS-4 -c \#00ff00
+exec swaybg -o HEADLESS-5 -c \#0000ff
+bar {
+    position top
+    colors {
+        statusline #ffffff
+        background #323232
+        inactive_workspace #32323200 #32323200 #5c5c5c
+    }
+}
+
+# Let pytest know that sway is up and what is its WAYLAND_DISPLAY
+exec bash -c "echo *@*READY*@* WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+
+# vim: ft=swayconfig
