@@ -547,3 +547,45 @@ def test_move_with_disabled_middle_output_reorg_allowed(sway_instance):
         o for o in all_outputs_final if o.name == middle_output_name
     )
     assert not disabled_output_final.active
+
+
+def test_set_scale(sway_instance):
+    i3 = i3ipc.Connection()
+
+    # Helper to check contiguity of outputs
+    def assert_outputs_contiguous():
+        outputs_state = get_current_output_state(i3)
+
+        for i in range(1, len(outputs_state)):
+            prev_output = outputs_state[i-1]
+            current_output = outputs_state[i]
+            # prev_output[1] is x, prev_output[3] is width
+            expected_x = prev_output[1] + prev_output[3]
+            # Check if current output's x is approximately where it should be
+            # The tolerance of 1 pixel is based on the original _sort_outputs
+            # logic (diff > 1 or diff < 1)
+            assert current_output[1] == pytest.approx(expected_x, abs=1)
+
+    # Test relative increase
+    Displays(Opts()).set_scale("+0.1")
+    focused_output_after_plus = next(o for o in i3.get_outputs() if o.focused)
+    assert focused_output_after_plus.scale == pytest.approx(1.1)
+    assert_outputs_contiguous()
+
+    # Test relative decrease
+    Displays(Opts()).set_scale("-0.05")
+    focused_output_after_minus = next(o for o in i3.get_outputs() if o.focused)
+    assert focused_output_after_minus.scale == pytest.approx(1.05)
+    assert_outputs_contiguous()
+
+    # Test absolute set
+    Displays(Opts()).set_scale("1.32")
+    focused_output_after_absolute = next(o for o in i3.get_outputs() if o.focused)
+    assert focused_output_after_absolute.scale == pytest.approx(1.32, rel=0.01)
+    assert_outputs_contiguous()
+
+    # Test setting scale below 1 (should cap at 1)
+    Displays(Opts()).set_scale("-100") # Large negative to ensure it goes below 1
+    focused_output_after_min_cap = next(o for o in i3.get_outputs() if o.focused)
+    assert focused_output_after_min_cap.scale == pytest.approx(1.0)
+    assert_outputs_contiguous()
