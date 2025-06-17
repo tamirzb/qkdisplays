@@ -160,6 +160,15 @@ class Displays:
 
         raise RuntimeError("No focused output found")
 
+    @staticmethod
+    def _get_current_scale() -> float:
+        """Finds the focused output and returns its scale"""
+        outputs = i3ipc.Connection().get_outputs()
+        for output in outputs:
+            if output.focused:
+                return output.scale
+        raise RuntimeError("No focused output found to get scale from")
+
     def get_sorted_display_locations(self) -> typing.Iterator[Point]:
         for output in self._sorted_outputs:
             yield Point(output.x, output.y)
@@ -230,6 +239,33 @@ class Displays:
 
         output = self._sorted_outputs[output_number - 1].name
         i3ipc.Connection().command("focus output " + output)
+
+    def set_scale(self, scale_str: str):
+        """
+        Sets the scale of the currently focused output.
+        If scale_str begins with '+' or '-', it's a relative change.
+        Otherwise, it's an absolute value.
+        """
+        i3 = i3ipc.Connection()
+
+        try:
+            if scale_str.startswith(("+", "-")):
+                new_scale = self._get_current_scale() + float(scale_str)
+            else:
+                new_scale = float(scale_str)
+        except ValueError:
+            raise ValueError(f"Invalid scale change value: {scale_str}")
+
+        if new_scale < 1:
+            # We assume a scale lower than 1 does not make sense
+            new_scale = 1
+
+        i3.command(f"output - scale {new_scale}")
+
+        # Changing scale can make outputs non-contiguous, so if we are allowed
+        # to move outputs then do so
+        if self._allow_reorg:
+            self.calculate_outputs()
 
 
 class UnixServer:
@@ -410,6 +446,13 @@ class Main:
         if you moved the displays through another tool.
         """
         UnixServer.send("notify")
+
+    def set_scale(self, scale: str):
+        """
+        Set the scale of the currently focused display. Can be an absolute
+        value (e.g., "1.5") or a relative change (e.g., "+0.2", "-0.1").
+        """
+        Displays(self._opts).set_scale(scale)
 
 
 def get_parser() -> argparse.ArgumentParser:
