@@ -1,3 +1,33 @@
+[project]
+name = "qkdisplays"
+version = "1.0"
+description = "A helper tool for quickly configuring a multi-monitor setup, built with tiled window managers in mind"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Tamir Zahavi-Brunner"},
+]
+keywords = ["sway", "displays", "monitor", "utility"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Desktop Environment :: Window Managers",
+    "Topic :: Utilities",
+]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = [
+    "i3ipc",
+    "PyGObject",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "pyright",
+]
+
 [project.scripts]
 qkdisplays = "qkdisplays.main:main"
 
@@ -6,3 +36,10 @@ line-length = 79
 
 [tool.pyright]
 useLibraryCodeForTypes = false
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["qkdisplays"]
