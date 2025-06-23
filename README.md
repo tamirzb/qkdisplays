@@ -64,9 +64,10 @@ Otherwise, the package is available on PyPI so can be installed by running
 pip install qkdisplays
 ```
 
-If you install via pip, ensure you have the system libraries for `gtk3` and
-`gtk-layer-shell` installed (e.g., `libgtk-3-dev` and `libgtk-layer-shell-dev`
-on Debian/Ubuntu, or `gtk3` and `gtk-layer-shell` on Arch Linux).
+If you install via pip, ensure you have the system libraries for `gtk3`,
+`gtk-layer-shell` and `PyGObject` installed (e.g., `libgtk-3-dev`,
+`libgtk-layer-shell-dev` and `python3-gi` on Debian/Ubuntu, or `gtk3`,
+`gtk-layer-shell` and `python-gobject` on Arch Linux).
 
 ## Sway configuration example
 
