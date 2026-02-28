@@ -48,6 +48,14 @@ where the displays are not all contiguous on the x axis.
 qkdisplays also supports setting the scaling of the currently focused display
 using `qkdisplays set_scale`.
 
+qkdisplays can save and restore display state (scale and layout ordering) with
+`qkdisplays save` and `qkdisplays restore`. State is saved per monitor
+identity (make/model/serial), so it persists across disconnections and
+reconnections. You can also run `qkdisplays auto_restore` as a background
+process that automatically restores state whenever displays are added or
+removed. Pair this with the `autosave` config option to have every layout or
+scale change saved automatically.
+
 For more information you can run `qkdisplays --help` or browse the man page.
 
 ## Demo
@@ -113,7 +121,16 @@ mode "monitors" {
     # Close qkdisplays, return to default mode
     bindsym Return exec qkdisplays close; mode "default"
     bindsym Escape exec qkdisplays close; mode "default"
+
+    # Saving/restoring state option #1: Do it manually
+    bindsym s exec qkdisplays save
+    bindsym r exec qkdisplays restore
 }
+
+# Saving/restoring state option #2: Automatically restore on any sway output
+# change. Best paired with setting `autosave` config option to true.
+exec qkdisplays auto_restore
+
 # Have qkdisplays running while in monitors mode to show monitor indications
 bindsym $mod+Shift+m exec qkdisplays show; mode "monitors"
 ```

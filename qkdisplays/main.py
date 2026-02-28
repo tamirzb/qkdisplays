@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import re
+import signal
 import socket
 import sys
 import typing
@@ -34,6 +35,7 @@ def construct_optional_dataclass(cls: type) -> type:
 class Opts:
     allow_reorg: bool = True
     strict_y: bool = True
+    autosave: bool = False
 
 
 class OptsOptional(construct_optional_dataclass(Opts)):
@@ -48,20 +50,40 @@ class Displays:
     @dataclasses.dataclass
     class OutputData:
         name: str
+        monitor_id: str
         x: int
         y: int
         width: int
         height: int
+        scale: float
         focused: bool
+
+    @dataclasses.dataclass
+    class SavedState:
+        # Monitor ID -> scale
+        scales: dict[str, float] = dataclasses.field(default_factory=dict)
+        # List of layouts, ordered by monitor IDs, in left-to-right order
+        layouts: list[list[str]] = dataclasses.field(default_factory=list)
 
     _allow_reorg: bool
     _strict_y: bool
+    _autosave: bool
     _sorted_outputs: list[OutputData]
 
     def __init__(self, opts: Opts):
         self._allow_reorg = opts.allow_reorg
         self._strict_y = opts.strict_y
+        self._autosave = opts.autosave
         self.calculate_outputs()
+
+    @staticmethod
+    def _get_monitor_id(output: i3ipc.OutputReply) -> str:
+        """Get a unique identifier for a monitor."""
+        return (
+            f"{output.ipc_data['make']}"
+            f"|{output.ipc_data['model']}"
+            f"|{output.ipc_data['serial']}"
+        )
 
     @staticmethod
     def _get_outputs_data() -> list[OutputData]:
@@ -74,10 +96,12 @@ class Displays:
 
             output_data = Displays.OutputData(
                 output.name,
+                Displays._get_monitor_id(output),
                 output.rect.x,
                 output.rect.y,
                 output.rect.width,
                 output.rect.height,
+                output.scale,
                 output.focused,
             )
             result.append(output_data)
@@ -191,6 +215,7 @@ class Displays:
         new_order = self._sorted_outputs[left_index : right_index + 1]
         # Swap between the outputs
         new_order[0], new_order[-1] = new_order[-1], new_order[0]
+        self._sorted_outputs[left_index : right_index + 1] = new_order
 
         # Enumerate outputs and set their x position according to the new
         # outputs order
@@ -206,6 +231,11 @@ class Displays:
         i3 = i3ipc.Connection()
         for output in self._sorted_outputs:
             i3.command(f"output {output.name} pos {output.x} {output.y}")
+
+        if self._autosave:
+            state = self._load_state()
+            self._update_state_layouts(state)
+            self._save_state(state)
 
         return True
 
@@ -266,6 +296,198 @@ class Displays:
         # to move outputs then do so
         if self._allow_reorg:
             self.calculate_outputs()
+
+        if self._autosave:
+            state = self._load_state()
+            for output_data in self._sorted_outputs:
+                if output_data.focused:
+                    state.scales[output_data.monitor_id] = new_scale
+            self._save_state(state)
+
+    @staticmethod
+    def _get_state_path() -> str:
+        """Get the path to the state JSON file."""
+        xdg_data_home = os.getenv("XDG_DATA_HOME")
+        if not xdg_data_home:
+            home = os.getenv("HOME", "")
+            xdg_data_home = os.path.join(home, ".local", "share")
+        directory = os.path.join(xdg_data_home, "qkdisplays")
+        os.makedirs(directory, exist_ok=True)
+        return os.path.join(directory, "state.json")
+
+    @staticmethod
+    def _load_state() -> SavedState:
+        """Load state from the state file."""
+        path = Displays._get_state_path()
+        if not os.path.exists(path):
+            return Displays.SavedState()
+        try:
+            with open(path) as f:
+                return Displays.SavedState(**json.load(f))
+        except (json.JSONDecodeError, TypeError) as e:
+            raise RuntimeError(f"State file {path} is malformed: {e}") from e
+
+    @staticmethod
+    def _save_state(state: SavedState) -> None:
+        """Save state to the state file."""
+        path = Displays._get_state_path()
+        with open(path, "w") as f:
+            json.dump(dataclasses.asdict(state), f, indent=4)
+
+    def _update_state_layouts(self, state: SavedState) -> None:
+        """Update state with current monitor ordering."""
+        layout = [o.monitor_id for o in self._sorted_outputs]
+
+        if len(layout) == 1:
+            # No need to save a layout of just one monitor
+            return
+
+        layout_set = set(layout)
+        for i, saved_layout in enumerate(state.layouts):
+            if set(saved_layout) == layout_set:
+                state.layouts[i] = layout
+                return
+
+        state.layouts.append(layout)
+
+    def _restore_scales(self, state: SavedState) -> bool:
+        """
+        Restore saved scales for current monitors.
+        Returns whether any scale was restored.
+        """
+        restored = False
+        i3 = i3ipc.Connection()
+        for output in self._sorted_outputs:
+            if output.monitor_id in state.scales:
+                saved_scale = state.scales[output.monitor_id]
+                if saved_scale != output.scale:
+                    i3.command(f"output {output.name} scale {saved_scale}")
+                    output.scale = saved_scale
+                    restored = True
+
+        # Changing scale can make outputs non-contiguous, so if we are allowed
+        # to move outputs then do so
+        if restored and self._allow_reorg:
+            self.calculate_outputs()
+
+        return restored
+
+    def _restore_layout(self, state: SavedState) -> bool:
+        """
+        Restore saved layout (monitor ordering) if the current set
+        of monitors matches a saved layout. Repositions monitors
+        contiguously according to the saved order.
+        Returns whether layout was restored.
+        """
+        current_ids = {o.monitor_id for o in self._sorted_outputs}
+
+        if len(current_ids) == 1:
+            # No need to restore a layout of just one monitor
+            return False
+
+        saved_order = None
+        for saved_layout in state.layouts:
+            if set(saved_layout) == current_ids:
+                saved_order = saved_layout
+                break
+        if saved_order is None:
+            return False
+
+        current_order = [o.monitor_id for o in self._sorted_outputs]
+        if current_order == saved_order:
+            return False
+
+        # Build a lookup from monitor_id to OutputData
+        by_id = {o.monitor_id: o for o in self._sorted_outputs}
+
+        # Reposition contiguously in the saved order, anchored to the
+        # current leftmost x position (outputs are already sorted left
+        # to right, so index 0 is the leftmost).
+        x = self._sorted_outputs[0].x
+        y = self._sorted_outputs[0].y
+        i3 = i3ipc.Connection()
+        ordered = []
+        for mid in saved_order:
+            output = by_id[mid]
+            if not self._strict_y:
+                y = output.y
+            i3.command(f"output {output.name} pos {x} {y}")
+            output.x = x
+            output.y = y
+            x += output.width
+            ordered.append(output)
+
+        self._sorted_outputs = ordered
+        return True
+
+    def save_state(self) -> None:
+        """Save the current scale and layout of all active monitors."""
+        state = self._load_state()
+        for output in self._sorted_outputs:
+            state.scales[output.monitor_id] = output.scale
+        self._update_state_layouts(state)
+        self._save_state(state)
+
+    def restore_state(self) -> tuple[bool, bool]:
+        """
+        Restore saved scale and layout for the current monitors.
+        Returns a tuple of (scale_restored, layout_restored).
+        """
+        state = self._load_state()
+        layout_restored = False
+        if self._allow_reorg:
+            layout_restored = self._restore_layout(state)
+        scale_restored = self._restore_scales(state)
+        return scale_restored, layout_restored
+
+    @staticmethod
+    def _i3_main_loop(i3: i3ipc.Connection) -> None:
+        """
+        Run i3.main() and propagate KeyboardInterrupt on Ctrl+C.
+        """
+        # i3.main() blocks on a raw socket recv(), which means SIGINT
+        # interrupts the syscall but the resulting exception is caught
+        # internally and main() returns normally rather than raising
+        # KeyboardInterrupt. To work around this, we install a temporary SIGINT
+        # handler that calls main_quit() (so the loop exits) and records the
+        # interruption, then re-raises KeyboardInterrupt after main() returns.
+
+        interrupted = False
+
+        def on_sigint(signum: int, frame) -> None:
+            nonlocal interrupted
+            interrupted = True
+            i3.main_quit()
+
+        old_handler = signal.signal(signal.SIGINT, on_sigint)
+        try:
+            i3.main()
+        finally:
+            signal.signal(signal.SIGINT, old_handler)
+
+        if interrupted:
+            raise KeyboardInterrupt
+
+    def wait_for_change(self) -> None:
+        """
+        Wait until there is a change with the active displays. Either a display
+        is added or removed.
+        """
+        current_ids = {o.monitor_id for o in self._sorted_outputs}
+
+        def on_output(conn: i3ipc.Connection, event) -> None:
+            # The output event can be triggered for multiple reasons that are
+            # irrelevant here (e.g. resolution change). So only finish waiting
+            # if we see that the active output ids changed.
+            new_ids = {o.monitor_id for o in self._get_outputs_data()}
+            if new_ids != current_ids:
+                conn.main_quit()
+
+        i3 = i3ipc.Connection()
+        i3.on(i3ipc.Event.OUTPUT, on_output)
+        self._i3_main_loop(i3)
+
+        self.calculate_outputs()
 
 
 class UnixServer:
@@ -454,6 +676,36 @@ class Main:
         """
         Displays(self._opts).set_scale(scale)
 
+    def save(self):
+        """
+        Save the current state of all displays.
+        """
+        Displays(self._opts).save_state()
+
+    def restore(self):
+        """
+        Restore displays from saved state if the current monitors match a saved
+        configuration. Restores both saved scales and layout, or just scale if
+        allow-reorg is false.
+        """
+        _, layout_restored = Displays(self._opts).restore_state()
+        if layout_restored:
+            UnixServer.send("notify")
+
+    def auto_restore(self):
+        """
+        Runs continuously. Automatically restores saved displays state
+        ('qkdisplays restore') when the active displays change (either one is
+        added or removed).
+        """
+        displays = Displays(self._opts)
+        _, layout_restored = displays.restore_state()
+        while True:
+            if layout_restored:
+                UnixServer.send("notify")
+            displays.wait_for_change()
+            _, layout_restored = displays.restore_state()
+
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
@@ -470,6 +722,12 @@ def get_parser() -> argparse.ArgumentParser:
         help="All displays should have the same position on the Y axis. If "
         "they are not then if allow_reorg is set qkdisplays will move them "
         "to be so, otherwise it will fail",
+    )
+    parser.add_argument(
+        "--autosave",
+        action=argparse.BooleanOptionalAction,
+        help="Automatically save state after every operation that "
+        "changes display layout or scale",
     )
     parser.add_argument(
         "--config",

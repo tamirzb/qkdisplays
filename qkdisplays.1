@@ -1,4 +1,4 @@
-.TH qkdisplays 1 "2025-06-18" "qkdisplays 1.0" "User Commands"
+.TH qkdisplays 1 "2026-03-02" "qkdisplays 1.0" "User Commands"
 .SH NAME
 qkdisplays \- Quick Displays
 .SH SYNOPSIS
@@ -25,6 +25,8 @@ Running \fBqkdisplays show\fR (which you can run when you enter the Sway mode) w
 \fBNOTE:\fR At the moment qkdisplays only supports configuring the positions of the displays on the x axis, and pretty much expects you to have a setup where all the displays are contiguous on that axis (you can even enforce them to all be on the same position on the y axis with the \fBstrict_y\fR config option). This is because A. the idea of this tool is to quickly configure the displays which might not be the case if the options are too complex and B. I have to admit that I personally only want this setup, and never actually found use for a case where the displays are not all contiguous on the x axis.
 .PP
 qkdisplays also supports setting the scaling of the currently focused display using \fBqkdisplays set_scale\fR.
+.PP
+qkdisplays can save and restore display state (scale and layout ordering) with \fBqkdisplays save\fR and \fBqkdisplays restore\fR. State is saved per monitor identity (make/model/serial), so it persists across disconnections and reconnections. You can also run \fBqkdisplays auto_restore\fR as a background process that automatically restores state whenever displays are added or removed. Pair this with the \fBautosave\fR config option to have every layout or scale change saved automatically.
 .SH OPTIONS
 .TP
 .B \-\-allow-reorg, \-\-no-allow-reorg
@@ -32,6 +34,9 @@ Allow qkdisplays to move displays to be contiguous from left to right if they ar
 .TP
 .B \-\-strict-y, \-\-no-strict-y
 All displays should have the same position on the Y axis. If they are not then if allow_reorg is set qkdisplays will move them to be so, otherwise it will fail.
+.TP
+.B \-\-autosave, \-\-no-autosave
+Automatically save state after every operation that changes display layout or scale.
 .TP
 .B \-\-config \fIPATH\fP
 Specifies a config file.
@@ -58,6 +63,19 @@ Normally a running 'qkdisplays show' will only refresh its pop ups in case the d
 .TP
 .B set_scale \fIscale\fP
 Set the scale of the currently focused display. Can be an absolute value (e.g., "1.5") or a relative change (e.g., "+0.2", "-0.1").
+.TP
+.B save
+Save the current state of all displays.
+.TP
+.B restore
+Restore displays from saved state if the current monitors match a saved
+configuration. Restores both saved scales and layout, or just scale if
+\fBallow-reorg\fR is false.
+.TP
+.B auto_restore
+Runs continuously. Automatically restores saved displays state
+(\fBqkdisplays restore\fR) when the active displays change (either one is
+added or removed).
 .SH CONFIGURATION
 .PP
 .B qkdisplays
@@ -77,11 +95,13 @@ The configuration file should be a JSON object with keys corresponding to the op
 .nf
 .RS
 .PP
-.B { 'allow_reorg': false, 'strict_y': true }
+.B { 'allow_reorg': false, 'strict_y': true, 'autosave': true }
 .RE
 .fi
 .PP
 Command-line arguments override settings from the configuration file.
+.PP
+State saved by \fBqkdisplays save\fR and the \fBautosave\fR option is stored in \fB$XDG_DATA_HOME/qkdisplays/state.json\fR (defaulting to \fB~/.local/share/qkdisplays/state.json\fR if \fB$XDG_DATA_HOME\fR is not set).
 .SH EXAMPLES
 .TP
 .B qkdisplays show
@@ -147,7 +167,16 @@ mode "monitors" {
     # Close qkdisplays, return to default mode
     bindsym Return exec qkdisplays close; mode "default"
     bindsym Escape exec qkdisplays close; mode "default"
+
+    # Saving/restoring state option #1: Do it manually
+    bindsym s exec qkdisplays save
+    bindsym r exec qkdisplays restore
 }
+
+# Saving/restoring state option #2: Automatically restore on any sway output
+# change. Best paired with setting `autosave` config option to true.
+exec qkdisplays auto_restore
+
 # Have qkdisplays running while in monitors mode to show monitor indications
 bindsym $mod+Shift+m exec qkdisplays show; mode "monitors"
 .fi
