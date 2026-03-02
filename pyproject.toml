@@ -1,6 +1,6 @@
 [project]
 name = "qkdisplays"
-version = "1.0"
+version = "1.1"
 description = "A helper tool for quickly configuring a multi-monitor setup, built with tiled window managers in mind"
 readme = "README.md"
 requires-python = ">=3.10"
