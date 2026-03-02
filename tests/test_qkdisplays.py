@@ -1,11 +1,23 @@
 import pytest
 import time
+import json
 import i3ipc
 from threading import Thread
 
-from qkdisplays.main import Displays, UnixServer, Opts, Main
+from qkdisplays.main import Displays, UnixServer, Opts, Main, get_config
 
 from .conftest import get_current_output_state, get_outputs
+
+
+def test_get_config(monkeypatch, tmp_path):
+    config_file = tmp_path / "qkdisplays.json"
+    config_file.write_text(json.dumps({"allow_reorg": False}))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    result = get_config()
+
+    assert result.allow_reorg is False
 
 
 def test_show_and_close(sway_instance):

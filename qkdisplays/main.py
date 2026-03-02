@@ -562,13 +562,16 @@ def get_config_path() -> str | None:
 
 
 def get_config(
-    config_path: str | None = get_config_path(),
+    config_path: str | None = None,
     values: OptsOptional = OptsOptional(),
 ) -> Opts:
     """
     Figure out what are the opts for the current run based on provided values,
     then the config file, then the defaults
     """
+    if config_path is None:
+        config_path = get_config_path()
+
     defaults = Opts()
     configs = [values, defaults]
     if config_path is not None:
